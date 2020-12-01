@@ -23,7 +23,7 @@ class SensorListener:
         self.AWSPort = 8883
         self.endpoint = "a2uqa59mml9h3u-ats.iot.us-east-1.amazonaws.com"
         self.basePathToCerts = r"C:\Users\szymo\OneDrive\Pulpit\SemestrIII\ChmuryObliczeniowe"
-        self.rootCAPath = self.basePathToCerts + r"\rsa.txt"
+        self.rootCAPath = self.basePathToCerts + r"\rootca.txt"
         self.privateKeyPath = self.basePathToCerts + r"\7d6e952451-private.pem.key"
         self.certificatePath = self.basePathToCerts + r"\7d6e952451-certificate.pem.crt"
 

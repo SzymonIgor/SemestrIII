@@ -3,4 +3,4 @@
 ChmuryObliczeniowe/IoT.db
 *.key
 *.crt
-rsa.txt
+rootca.txt
