@@ -1,49 +1,81 @@
 # ------------------------------------------
 # --- Author: Pradeep Singh
-# --- Changes: Szymon Trela
-# --- Date: 2020
-# --- Version: 1.1
-# --- Python Ver: 3.8
+# --- Date: 20th January 2017
+# --- Version: 1.0
+# --- Python Ver: 2.7
 # --- Details At: https://iotbytes.wordpress.com/store-mqtt-data-from-sensors-into-sql-database/
 # ------------------------------------------
 
 import paho.mqtt.client as mqtt
 from store_Sensor_Data_to_DB import sensor_data_handler
-
-# MQTT Settings
-MQTT_Broker = "broker.hivemq.com"
-MQTT_Port = 1883
-Keep_Alive_Interval = 45
-MQTT_Topic = "STR/#"
+from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
+import time
 
 
-# Subscribe to all Sensors at Base Topic
-def on_connect(mqttc, userdata, flags, rc):
-    mqttc.subscribe(MQTT_Topic, 0)
+class SensorListener:
+    def __init__(self):
+        self.data_list = []
+        # MQTT Settings
+        self.mqttc = None
+        self.MQTT_Topic_Get = "cloud2020/sensors/#"
+        self.MQTT_Topic_Group = "cloud2020/DataGroup"
+        self.AWSClientName = "SensorListener"
+        self.AWSPort = 8883
+        self.endpoint = "a2uqa59mml9h3u-ats.iot.us-east-1.amazonaws.com"
+        self.basePathToCerts = r"C:\Users\szymo\OneDrive\Pulpit\SemestrIII\ChmuryObliczeniowe"
+        self.rootCAPath = self.basePathToCerts + r"\rsa.txt"
+        self.privateKeyPath = self.basePathToCerts + r"\7d6e952451-private.pem.key"
+        self.certificatePath = self.basePathToCerts + r"\7d6e952451-certificate.pem.crt"
+
+    def connect_to_broker(self):
+        self.mqttc = AWSIoTMQTTClient(self.AWSClientName)
+        self.mqttc.configureEndpoint(self.endpoint, self.AWSPort)
+        self.mqttc.configureCredentials(self.rootCAPath, self.privateKeyPath, self.certificatePath)
+
+        # AWSIoTMQTTClient connection configuration
+        self.mqttc.configureAutoReconnectBackoffTime(1, 32, 20)
+        self.mqttc.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
+        self.mqttc.configureDrainingFrequency(2)  # Draining: 2 Hz
+        self.mqttc.configureConnectDisconnectTimeout(10)  # 10 sec
+        self.mqttc.configureMQTTOperationTimeout(20)  # 20 sec
+
+        self.mqttc.connect()
+        print('Connected')
+
+        self.mqttc.subscribe(self.MQTT_Topic_Get, 1, self.customCallback)
+        self.mqttc.subscribe(self.MQTT_Topic_Group, 1, self.groupCallback)
+
+    def publish_To_Topic(self, topic, message):
+        self.mqttc.publish(topic, message, 1)
+        print("Published")
+        # print("Published: " + str(message) + " " + "on MQTT Topic: " + str(topic))
+
+    # Custom MQTT message callback
+    def customCallback(self, client, userdata, message):
+        print("Collected")
+        # print(message.payload)
+        self.data_list.append(message.payload.decode("utf-8"))
+
+    def sender(self):
+        while True:
+            time.sleep(0.001)
+            if len(self.data_list) >= 10:
+                temp = self.data_list
+                self.data_list = []
+                for payload in temp:
+                    self.publish_To_Topic(self.MQTT_Topic_Group, str(payload))
+                print("Published")
+
+    def groupCallback(self, client, userdata, message):
+        print("Message sent")
 
 
-# Save Data into DB Table
-def on_message(mqttc, obj, msg):
-    # This is the Master Call for saving MQTT Data into DB
-    # For details of "sensor_Data_Handler" function please refer "sensor_data_to_db.py"
-    print(f'MQTT Data Received...\n'
-          f'MQTT Topic: {msg.topic}\n'
-          f'Data: {msg.payload}\n')
-    sensor_data_handler(msg.topic, msg.payload)
+def main():
+    sL = SensorListener()
+    sL.connect_to_broker()
+    sL.sender()
 
 
-def on_subscribe(mqttc, obj, mid, granted_qos):
-    pass
+if __name__ == "__main__":
+    main()
 
-
-mqttc = mqtt.Client()
-
-# Assign event callbacks
-mqttc.on_message = on_message
-mqttc.on_connect = on_connect
-mqttc.on_subscribe = on_subscribe
-# Connect
-mqttc.connect(MQTT_Broker, int(MQTT_Port), int(Keep_Alive_Interval))
-
-# Continue the network loop
-mqttc.loop_forever()

@@ -12,44 +12,24 @@ import paho.mqtt.client as mqtt
 import random, threading, json
 from datetime import datetime
 from near_location import near_location
+import sys
+from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
+import time
 
 # ====================================================
 # MQTT Settings
 MQTT_Broker = "broker.hivemq.com"
 MQTT_Port = 1883
 Keep_Alive_Interval = 45
-MQTT_Topic = "STR/D212020"
 # ====================================================
 
+def customCallback(client, userdata, message):
+    print("Received a new message: ")
+    print(message.payload)
+    print("from topic: ")
+    print(message.topic)
+    print("--------------\n\n")
 
-def on_connect(mqttc, userdata, flags, rc):
-    if rc != 0:
-        print('Unable to connect to MQTT Broker...\n')
-    else:
-        print(f'Connected with MQTT Broker: {MQTT_Broker}\n')
-
-
-def on_publish(mqttc, userdata, mid):
-    print("AA")
-    pass
-
-
-def on_disconnect(mqttc, userdata, rc):
-    if rc != 0:
-        pass
-
-
-mqttc = mqtt.Client()
-mqttc.on_connect = on_connect
-mqttc.on_disconnect = on_disconnect
-mqttc.on_publish = on_publish
-mqttc.connect(MQTT_Broker, int(MQTT_Port), int(Keep_Alive_Interval))
-
-
-def publish_To_Topic(topic, message):
-    mqttc.publish(topic, message)
-    print(f'Published: {message}\n'
-          f'on MQTT Topic: {topic}\n')
 
 
 # ====================================================
@@ -57,8 +37,7 @@ def publish_To_Topic(topic, message):
 class Sensor:
     ID = 0
 
-    def __init__(self, name, delta_time):
-        self.delta_time = delta_time
+    def __init__(self, name, deltatime):
         self._id = Sensor.ID
         Sensor.ID += 1
         self.id = str(name)
@@ -67,19 +46,30 @@ class Sensor:
         self.temperature = None
         self.humidity = None
         self.PM10 = None
-        self.data = {'_id':         self._id,
-                     'sensor_id':   self.id,
-                     'cords':       self.geo_cords,
-                     'datetime':    [],
-                     'temperature': [],
-                     'humidity':    [],
-                     'PM10':        []}
+        self.data = None
+        self.deltatime = deltatime
+
+        # MQTT Settings
+        self.mqttc = None
+        self.MQTT_Topic = f"cloud2020/sensors/{self.id}"
+        self.AWSClientName = "AWSPython"
+        self.AWSPort = 8883
+        self.endpoint = "a2uqa59mml9h3u-ats.iot.us-east-1.amazonaws.com"
+        self.basePathToCerts = r"C:\Users\szymo\OneDrive\Pulpit\SemestrIII\ChmuryObliczeniowe"
+        self.rootCAPath = self.basePathToCerts + r"\rsa.txt"
+        self.privateKeyPath = self.basePathToCerts + r"\7d6e952451-private.pem.key"
+        self.certificatePath = self.basePathToCerts + r"\7d6e952451-certificate.pem.crt"
 
     def update_data(self):
-        self.data['datetime'].append(self.date_n_time)
-        self.data['temperature'].append(self.temperature)
-        self.data['humidity'].append(self.humidity)
-        self.data['PM10'].append(self.PM10)
+        temp = dict()
+        temp['id'] = self._id
+        temp['sensorID'] = self.id
+        temp['cords'] = self.geo_cords
+        temp['datetime'] = self.date_n_time
+        temp['temperature'] = self.temperature
+        temp['humidity'] = self.humidity
+        temp['PM10'] = self.PM10
+        self.data = temp
 
         self.date_n_time = None
         self.temperature = None
@@ -95,28 +85,54 @@ class Sensor:
         self.update_data()
 
     def reset_data_buffer(self):
-        self.data['datetime'] = []
-        self.data['temperature'] = []
-        self.data['humidity'] = []
-        self.data['PM10'] = []
+        self.data = None
 
-    def collect_data(self):
+    def publish_To_Topic(self, topic, message):
+        self.mqttc.publish(topic, message, 1)
+        print("Published: " + str(message) + " " + "on MQTT Topic: " + str(topic))
+
+    def create_json(self):
         print(f'Publishing fake data...')
         print(self.data)
-        publish_To_Topic(MQTT_Topic, json.dumps(self.data))
+        return json.dumps(self.data)
+
+    def connect_sensor(self):
+        self.mqttc = AWSIoTMQTTClient(self.AWSClientName)
+        self.mqttc.configureEndpoint(self.endpoint, self.AWSPort)
+        self.mqttc.configureCredentials(self.rootCAPath, self.privateKeyPath, self.certificatePath)
+
+        # AWSIoTMQTTClient connection configuration
+        self.mqttc.configureAutoReconnectBackoffTime(1, 32, 20)
+        self.mqttc.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
+        self.mqttc.configureDrainingFrequency(2)  # Draining: 2 Hz
+        self.mqttc.configureConnectDisconnectTimeout(10)  # 10 sec
+        self.mqttc.configureMQTTOperationTimeout(5)  # 5 sec
+
+        self.mqttc.connect()
+        print('Connected')
+
+        self.mqttc.subscribe(self.MQTT_Topic, 1, customCallback)
+
+        time.sleep(2)
+
+    def publish_Fake_Sensor_Values_to_MQTT(self):
+        threading.Timer(self.deltatime, self.publish_Fake_Sensor_Values_to_MQTT).start()
+        self.generate_data()
+        self.publish_To_Topic(self.MQTT_Topic, self.create_json())
         self.reset_data_buffer()
 
 
-    def start(self):
-        threading.Timer(self.delta_time, self.start, ).start()
-        self.generate_data()
-        if len(self.data['datetime']) >= 10:
-            self.collect_data()
+def main():
+    # sensorID = sys.argv[1]
+    s1 = Sensor("s1", 1)
+    s1.connect_sensor()
+    s1.publish_Fake_Sensor_Values_to_MQTT()
+    s2 = Sensor("s2", 2)
+    s2.connect_sensor()
+    s2.publish_Fake_Sensor_Values_to_MQTT()
 
 
-s1 = Sensor('s1', 3)
-s1.start()
-s2 = Sensor('s2', 1)
-s2.start()
+if __name__ == "__main__":
+    main()
 
 # ====================================================
